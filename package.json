@@ -1,1 +1,13 @@
-
+{
+  "name": "sunplus-proxy",
+  "version": "1.0.0",
+  "description": "Xtream Proxy for Sunplus",
+  "main": "index.js",
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.4.0"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
