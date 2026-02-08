@@ -5,13 +5,11 @@ const PORT = process.env.PORT || 3000;
 
 const M3U_URL = "https://github.com/klemen860-cmyk/tvnov/raw/refs/heads/main/yabanci.m3u";
 
-// M3U Verilerini Çeken Fonksiyon (Logolar dahil)
 async function getM3UData() {
     const response = await axios.get(M3U_URL);
     const lines = response.data.split('\n').filter(l => l.trim() !== "");
     let liveCats = [], vodCats = [], liveStreams = [], vodStreams = [];
-    let cMap = new Map(), vMap = new Map();
-    let sIdx = 1, vIdx = 1;
+    let cMap = new Map(), vMap = new Map(), sIdx = 1, vIdx = 1;
 
     for (let i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('#EXTINF:')) {
@@ -19,11 +17,14 @@ async function getM3UData() {
             const sUrl = lines[i + 1] ? lines[i + 1].trim() : "";
             if (!sUrl || !sUrl.startsWith('http')) continue;
 
-            let logo = "";
-            if (info.includes('tvg-logo="')) logo = info.split('tvg-logo="')[1].split('"')[0];
-            
+            let logo = info.includes('tvg-logo="') ? info.split('tvg-logo="')[1].split('"')[0] : "";
             let cName = info.includes('group-title="') ? info.split('group-title="')[1].split('"')[0] : "Genel";
-            const isVod = sUrl.match(/\.(mp4|mkv|avi|mov)$/i) || info.toLowerCase().includes('vod') || info.toLowerCase().includes('sinema');
+            
+            // Link m3u8 mi ts mi tespit et
+            const isM3u8 = sUrl.includes('.m3u8');
+            const ext = isM3u8 ? "m3u8" : "ts";
+            
+            const isVod = sUrl.match(/\.(mp4|mkv|avi|mov)$/i) || info.toLowerCase().includes('vod');
 
             if (isVod) {
                 if (!vMap.has(cName)) {
@@ -44,7 +45,7 @@ async function getM3UData() {
                 }
                 liveStreams.push({
                     "num": sIdx, "name": info.split(',').pop().trim(), "stream_id": sIdx.toString(),
-                    "category_id": cMap.get(cName), "container_extension": "ts", "stream_icon": logo
+                    "category_id": cMap.get(cName), "container_extension": ext, "stream_icon": logo
                 });
                 sIdx++;
             }
@@ -53,7 +54,6 @@ async function getM3UData() {
     return { liveCats, vodCats, liveStreams, vodStreams };
 }
 
-// API İşlemleri
 app.get(['/', '/get.php', '/player_api.php'], async (req, res) => {
     const { action, category_id } = req.query;
     try {
@@ -72,7 +72,7 @@ app.get(['/', '/get.php', '/player_api.php'], async (req, res) => {
     } catch (e) { res.status(500).send("API Error"); }
 });
 
-// YAYIN TÜNELLEME (PROXY) - IPTVnator'ın oynatmasını sağlayan mucize kısım
+// YÖNLENDİRME (Redirect) - Çoğu Sunplus ve IPTVnator sürümü için en temizi budur
 app.get(['/live/:u/:p/:id', '/movie/:u/:p/:id'], async (req, res) => {
     try {
         const streamId = parseInt(req.params.id.split('.')[0]);
@@ -80,23 +80,11 @@ app.get(['/live/:u/:p/:id', '/movie/:u/:p/:id'], async (req, res) => {
         const streams = responseM3U.data.split('\n').filter(l => l.trim().startsWith('http'));
         const targetUrl = streams[streamId - 1].trim();
 
-        console.log("Streaming from:", targetUrl);
-
-        // Yayını Render üzerinden akıtıyoruz
-        const streamResponse = await axios({
-            method: 'get',
-            url: targetUrl,
-            responseType: 'stream',
-            headers: { 'User-Agent': 'Mozilla/5.0' } // Bazı sunucular cihaz taklidi ister
-        });
-
-        res.setHeader('Access-Control-Allow-Origin', '*'); // CORS hatasını bitiren header
-        streamResponse.data.pipe(res); // Veriyi doğrudan paketleyip gönder
-
-    } catch (e) {
-        console.error("Stream Error:", e.message);
-        res.status(500).send("Stream Connection Failed");
-    }
+        // 302 yönlendirmesi gönderiyoruz ama Header'ları temizliyoruz
+        res.status(302).setHeader('Location', targetUrl);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.end();
+    } catch (e) { res.status(500).send("Stream Error"); }
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
