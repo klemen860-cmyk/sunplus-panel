@@ -5,6 +5,7 @@ const PORT = process.env.PORT || 3000;
 
 const M3U_URL = "https://github.com/klemen860-cmyk/tvnov/raw/refs/heads/main/yabanci.m3u";
 
+// M3U Verilerini Çeken Fonksiyon (Logolar dahil)
 async function getM3UData() {
     const response = await axios.get(M3U_URL);
     const lines = response.data.split('\n').filter(l => l.trim() !== "");
@@ -18,11 +19,9 @@ async function getM3UData() {
             const sUrl = lines[i + 1] ? lines[i + 1].trim() : "";
             if (!sUrl || !sUrl.startsWith('http')) continue;
 
-            // LOGO ÇEKME (tvg-logo veya url-logo etiketini yakalar)
             let logo = "";
             if (info.includes('tvg-logo="')) logo = info.split('tvg-logo="')[1].split('"')[0];
-            else if (info.includes('url-logo="')) logo = info.split('url-logo="')[1].split('"')[0];
-
+            
             let cName = info.includes('group-title="') ? info.split('group-title="')[1].split('"')[0] : "Genel";
             const isVod = sUrl.match(/\.(mp4|mkv|avi|mov)$/i) || info.toLowerCase().includes('vod') || info.toLowerCase().includes('sinema');
 
@@ -33,15 +32,8 @@ async function getM3UData() {
                     vodCats.push({ "category_id": cId, "category_name": cName });
                 }
                 vodStreams.push({
-                    "num": vIdx,
-                    "name": info.split(',').pop().trim(),
-                    "stream_id": vIdx.toString(),
-                    "category_id": vMap.get(cName),
-                    "container_extension": sUrl.split('.').pop() || "mp4",
-                    "stream_icon": logo, // Poster buraya
-                    "movie_image": logo, // Bazı cihazlar için ekstra poster alanı
-                    "rating": "8.0",
-                    "added": "1700000000"
+                    "num": vIdx, "name": info.split(',').pop().trim(), "stream_id": vIdx.toString(),
+                    "category_id": vMap.get(cName), "container_extension": "mp4", "stream_icon": logo
                 });
                 vIdx++;
             } else {
@@ -51,14 +43,8 @@ async function getM3UData() {
                     liveCats.push({ "category_id": cId, "category_name": cName });
                 }
                 liveStreams.push({
-                    "num": sIdx,
-                    "name": info.split(',').pop().trim(),
-                    "stream_id": sIdx.toString(),
-                    "category_id": cMap.get(cName),
-                    "container_extension": "ts",
-                    "stream_icon": logo, // Kanal logosu buraya
-                    "epg_channel_id": "",
-                    "added": "1700000000"
+                    "num": sIdx, "name": info.split(',').pop().trim(), "stream_id": sIdx.toString(),
+                    "category_id": cMap.get(cName), "container_extension": "ts", "stream_icon": logo
                 });
                 sIdx++;
             }
@@ -67,6 +53,7 @@ async function getM3UData() {
     return { liveCats, vodCats, liveStreams, vodStreams };
 }
 
+// API İşlemleri
 app.get(['/', '/get.php', '/player_api.php'], async (req, res) => {
     const { action, category_id } = req.query;
     try {
@@ -81,25 +68,35 @@ app.get(['/', '/get.php', '/player_api.php'], async (req, res) => {
             let list = (category_id && category_id !== "0") ? data.vodStreams.filter(s => s.category_id === category_id) : data.vodStreams;
             return res.json(list);
         }
-        // Boş dönmemesi gereken diğer alanlar
-        if (action === 'get_series_categories' || action === 'get_series_streams') return res.json([]);
-
-        return res.json({
-            "user_info": { "status": "Active", "exp_date": "1893456000" },
-            "server_info": { "url": req.hostname, "port": "80" }
-        });
-    } catch (e) { res.status(500).send("Error"); }
+        return res.json({ "user_info": { "status": "Active" }, "server_info": { "url": req.hostname, "port": "80" } });
+    } catch (e) { res.status(500).send("API Error"); }
 });
 
-// Yayın linkleri için yönlendirme aynı kalıyor
+// YAYIN TÜNELLEME (PROXY) - IPTVnator'ın oynatmasını sağlayan mucize kısım
 app.get(['/live/:u/:p/:id', '/movie/:u/:p/:id'], async (req, res) => {
     try {
         const streamId = parseInt(req.params.id.split('.')[0]);
-        const response = await axios.get(M3U_URL);
-        const lines = response.data.split('\n').filter(l => l.trim().startsWith('http'));
-        if (lines[streamId - 1]) return res.redirect(lines[streamId - 1].trim());
-        res.status(404).send("Not Found");
-    } catch (e) { res.status(500).send("Error"); }
+        const responseM3U = await axios.get(M3U_URL);
+        const streams = responseM3U.data.split('\n').filter(l => l.trim().startsWith('http'));
+        const targetUrl = streams[streamId - 1].trim();
+
+        console.log("Streaming from:", targetUrl);
+
+        // Yayını Render üzerinden akıtıyoruz
+        const streamResponse = await axios({
+            method: 'get',
+            url: targetUrl,
+            responseType: 'stream',
+            headers: { 'User-Agent': 'Mozilla/5.0' } // Bazı sunucular cihaz taklidi ister
+        });
+
+        res.setHeader('Access-Control-Allow-Origin', '*'); // CORS hatasını bitiren header
+        streamResponse.data.pipe(res); // Veriyi doğrudan paketleyip gönder
+
+    } catch (e) {
+        console.error("Stream Error:", e.message);
+        res.status(500).send("Stream Connection Failed");
+    }
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
