@@ -97,7 +97,11 @@ app.get(['/live/:u/:p/:id', '/movie/:u/:p/:id'], async (req, res) => {
         const streams = responseM3U.data.split('\n').filter(l => l.trim().startsWith('http'));
         const targetUrl = streams[streamId - 1].trim();
 
+        // IPTVnator gibi Electron uygulamaları için Header manipülasyonu
         res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Expose-Headers', 'Location');
+        
+        // Sunplus ve VLC için standart 302 yönlendirmesi
         return res.redirect(302, targetUrl);
     } catch (e) { res.status(404).send("Not Found"); }
 });
